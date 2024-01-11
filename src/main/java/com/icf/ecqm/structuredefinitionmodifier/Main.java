@@ -1,10 +1,11 @@
 package com.icf.ecqm.structuredefinitionmodifier;
+
 import java.io.*;
+import java.util.*;
 
 import com.google.gson.*;
 
 public class Main {
-
 
     public static final String QICORE_KEYELEMENT = "qicore-keyelement";
     public static final String USCDI_REQUIREMENT = "uscdi-requirement";
@@ -13,31 +14,116 @@ public class Main {
     public static final String ELEMENT = "element";
     public static final String EXTENSION = "extension";
     public static final String STRUCTURE_DEFINITION = "StructureDefinition";
+    public static final String DIFFERENTIAL = "differential";
 
     public static void main(String[] args) {
 
-            String inputFolder = "input" +  File.separator + "profiles";
-            String outputFolder = "output";
+        String inputFolder = "input" + File.separator + "profiles";
+        String outputFolder = "output";
 
-            File outputDir = new File(outputFolder);
-            File[] outputFiles = outputDir.listFiles((dir, name) -> name.toLowerCase().startsWith(STRUCTURE_DEFINITION.toLowerCase()) &&
-                    name.toLowerCase().endsWith(".json"));
+        File outputDir = new File(outputFolder);
+        File[] outputFiles = outputDir.listFiles((dir, name) -> name.toLowerCase().startsWith(STRUCTURE_DEFINITION.toLowerCase()) &&
+                name.toLowerCase().endsWith(".json"));
 
-            if (outputFiles != null) {
-                for (File outputFile : outputFiles) {
-                    System.out.println("Processing " + outputFile.getAbsolutePath());
-                    processFile(outputFile, inputFolder);
-                    System.out.println("\r\n");
+        if (outputFiles != null) {
+            Map<String, List<String>> shortDescriptionFields = new HashMap<>();
+
+            for (File outputFile : outputFiles) {
+                System.out.println("\r\nProcessing " + outputFile.getAbsolutePath());
+                List<String> shortDescriptionsToChange = getShortDescriptionsToChangeList(outputFile);
+                if (!shortDescriptionsToChange.isEmpty()) {
+                    shortDescriptionFields.put(outputFile.getName(), shortDescriptionsToChange);
+                }
+            }
+            System.out.println("\r\n");
+            System.out.println("Files that met criteria: " + String.join(",", shortDescriptionFields.keySet()));
+            System.out.println("\r\n");
+            File inputDir = new File(inputFolder);
+            //now loop through files found to have descriptions changed:
+            File[] inputFiles = inputDir.listFiles((dir, name) -> shortDescriptionFields.containsKey(name));
+
+            System.out.println("Found matching files in " + inputFolder + ": " + Arrays.toString(inputFiles));
+            System.out.println("\r\n");
+            if (inputFiles != null) {
+                for (File inputFile : inputFiles) {
+                    List<String> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(inputFile.getName());
+                    if (shortDescriptionsToChangeInInputFile != null && !shortDescriptionsToChangeInInputFile.isEmpty()) {
+
+                        System.out.println("Processing short descriptions in " + inputFile.getAbsolutePath());
+                        changeShortDescriptions(inputFile, shortDescriptionsToChangeInInputFile);
+                    }
                 }
             } else {
-                System.err.println("Error: Unable to list files in the output folder.");
+                System.err.println("Error: Unable to list files in the input folder.");
             }
 
-            System.out.println("File modification is done. Generating the IG should show updated shortDescription.");
+            System.out.println("\r\n");
+
+        } else {
+            System.err.println("Error: Unable to list files in the output folder.");
         }
 
-    private static void processFile(File outputFile, String inputFolder) {
-        String identifier = outputFile.getName();
+        System.out.println("File modification is done. Generating the IG should show updated shortDescription.");
+    }
+
+    private static void changeShortDescriptions(File inputFile, List<String> identifiers) {
+        if (identifiers == null || identifiers.isEmpty()) {
+            System.err.println("Error: List of short descriptions for " + inputFile.getName() + " are blank.");
+            return;
+        }else{
+            System.out.println("Looking for identifiers: " + String.join(",", identifiers));
+        }
+
+        try {
+            JsonObject inputJson = parseJsonFromFile(inputFile);
+            if (inputJson.has(DIFFERENTIAL) && inputJson.getAsJsonObject(DIFFERENTIAL).has(ELEMENT)) {
+                JsonArray elementsArray = inputJson.getAsJsonObject(DIFFERENTIAL).getAsJsonArray(ELEMENT);
+                for (JsonElement element : elementsArray) {
+
+                    if (element instanceof JsonObject) {
+
+                        JsonObject elementObj = (JsonObject) element;
+
+                        String elementIdentifier = elementObj.get("id").getAsString();
+
+                        System.out.println(elementIdentifier);
+                        if (identifiers.contains(elementIdentifier)) {
+                            System.out.println("Match: " + elementIdentifier);
+
+                            String shortDescription = "";
+
+                            try{
+                                shortDescription = elementObj.getAsJsonPrimitive("short").getAsString();
+                            }catch (Exception e){
+                                //doesn't have a short description yet, we'll add one.
+                            }
+
+                            // Modify shortDescription
+                            String newShortDescription = "(USCDI)(QI-Core)" + shortDescription
+                                    .replace("(QI-Core)", "")
+                                    .replace("(USCDI)", "");
+
+                            // Update shortDescription in the output JSON
+                            elementObj.addProperty("short", newShortDescription);
+
+                            System.out.println(elementIdentifier + " to be modified: " + newShortDescription);
+                        }
+                    }
+                }
+            }
+
+            writeJsonToFile(inputFile, inputJson);
+
+        } catch (Exception e) {
+            System.err.println("Error processing file: " + inputFile.getName());
+            e.printStackTrace();
+        }
+
+    }
+
+    private static List<String> getShortDescriptionsToChangeList(File outputFile) {
+
+        List<String> shortDescriptionsToChange = new ArrayList<>();
         try {
             // Parse JSON data from the file in output folder:
             JsonObject outputJson = parseJsonFromFile(outputFile);
@@ -46,8 +132,6 @@ public class Main {
                 //get all the elements to loop through:
                 JsonArray elementsArray = outputJson.getAsJsonObject(SNAPSHOT).getAsJsonArray(ELEMENT);
 
-                boolean changesWritten = false;
-                // Loop through the elements array
                 for (JsonElement element : elementsArray) {
 
                     if (element instanceof JsonObject) {
@@ -70,25 +154,20 @@ public class Main {
                                         .replace("(USCDI)", "");
 
                                 // Update shortDescription in the output JSON
-                                elementObj.addProperty("short", newShortDescription);
-                                changesWritten = true;
-                                // Write contents of JSON data to the output file, overwriting it
-                                System.out.println("Updated: " + elementIdentifier + " - " + newShortDescription);
+                                System.out.println("Will update: " + elementIdentifier + " - " + newShortDescription);
+                                shortDescriptionsToChange.add(elementIdentifier);
 
                             }
                         }
                     }
-                }
-                if (changesWritten) {
-                    writeJsonToFile(new File(inputFolder + File.separator + outputFile.getName()), outputJson);
-                }else{
-                    System.out.println("No changes made.");
                 }
             }
         } catch (Exception e) {
             System.err.println("Error processing file: " + outputFile.getName());
             e.printStackTrace();
         }
+
+        return shortDescriptionsToChange;
     }
 
     private static boolean hasBothURLTypes(JsonArray extensionArray) {
@@ -112,21 +191,19 @@ public class Main {
     }
 
 
-
     private static JsonObject parseJsonFromFile(File file) throws Exception {
-            try (Reader reader = new FileReader(file)) {
-                return JsonParser.parseReader(reader).getAsJsonObject();
-            }
+        try (Reader reader = new FileReader(file)) {
+            return JsonParser.parseReader(reader).getAsJsonObject();
         }
+    }
 
-        private static void writeJsonToFile(File file, JsonObject json) throws Exception {
-            try (Writer writer = new FileWriter(file)) {
-                Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                gson.toJson(json, writer);
-                System.out.println("Changes written to " + file.getAbsolutePath());
-            }
+    private static void writeJsonToFile(File file, JsonObject json) throws Exception {
+        try (Writer writer = new FileWriter(file)) {
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            gson.toJson(json, writer);
+            System.out.println("Changes written to " + file.getAbsolutePath() + "\r\n");
         }
-
+    }
 
 
 }
