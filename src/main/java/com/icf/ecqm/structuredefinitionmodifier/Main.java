@@ -32,7 +32,13 @@ public class Main {
                 System.out.println("\r\nProcessing " + outputFile.getAbsolutePath());
                 List<String> shortDescriptionsToChange = getShortDescriptionsToChangeList(outputFile);
                 if (!shortDescriptionsToChange.isEmpty()) {
-                    shortDescriptionFields.put(outputFile.getName().toLowerCase(), shortDescriptionsToChange);
+                    String identifier = "";
+                    try {
+                        identifier = getIdFromJson(outputFile).toLowerCase();
+                    }catch (Exception e){
+                        identifier = outputFile.getName().toLowerCase();
+                    }
+                    shortDescriptionFields.put(identifier, shortDescriptionsToChange);
                 }
             }
             System.out.println("\r\n");
@@ -40,15 +46,22 @@ public class Main {
             System.out.println("\r\n");
             File inputDir = new File(inputFolder);
             //now loop through files found to have descriptions changed:
-            File[] inputFiles = inputDir.listFiles((dir, name) -> shortDescriptionFields.containsKey(name.toLowerCase()));
+            File[] inputFiles = inputDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
 
             System.out.println("Found matching files in " + inputFolder + ": " + Arrays.toString(inputFiles));
             System.out.println("\r\n");
             if (inputFiles != null) {
                 for (File inputFile : inputFiles) {
-                    List<String> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(inputFile.getName().toLowerCase());
-                    if (shortDescriptionsToChangeInInputFile != null && !shortDescriptionsToChangeInInputFile.isEmpty()) {
 
+                    String identifier = "";
+                    try {
+                        identifier = getIdFromJson(inputFile).toLowerCase();
+                    }catch (Exception e){
+                        identifier = inputFile.getName().toLowerCase();
+                    }
+                    List<String> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(identifier);
+
+                    if (shortDescriptionsToChangeInInputFile != null && !shortDescriptionsToChangeInInputFile.isEmpty()) {
                         System.out.println("Processing short descriptions in " + inputFile.getAbsolutePath());
                         changeShortDescriptions(inputFile, shortDescriptionsToChangeInInputFile);
                     }
@@ -121,12 +134,17 @@ public class Main {
 
     }
 
+    private static String getIdFromJson(File file) throws Exception{
+        JsonObject jsonData = parseJsonFromFile(file);
+        return jsonData.get("id").getAsString();
+    }
     private static List<String> getShortDescriptionsToChangeList(File outputFile) {
 
         List<String> shortDescriptionsToChange = new ArrayList<>();
         try {
             // Parse JSON data from the file in output folder:
             JsonObject outputJson = parseJsonFromFile(outputFile);
+
             // Get the snapshot array
             if (outputJson.has(SNAPSHOT) && outputJson.getAsJsonObject(SNAPSHOT).has(ELEMENT)) {
                 //get all the elements to loop through:
