@@ -32,7 +32,7 @@ public class Main {
                 System.out.println("\r\nProcessing " + outputFile.getAbsolutePath());
                 List<String> shortDescriptionsToChange = getShortDescriptionsToChangeList(outputFile);
                 if (!shortDescriptionsToChange.isEmpty()) {
-                    shortDescriptionFields.put(outputFile.getName(), shortDescriptionsToChange);
+                    shortDescriptionFields.put(outputFile.getName().toLowerCase(), shortDescriptionsToChange);
                 }
             }
             System.out.println("\r\n");
@@ -40,13 +40,13 @@ public class Main {
             System.out.println("\r\n");
             File inputDir = new File(inputFolder);
             //now loop through files found to have descriptions changed:
-            File[] inputFiles = inputDir.listFiles((dir, name) -> shortDescriptionFields.containsKey(name));
+            File[] inputFiles = inputDir.listFiles((dir, name) -> shortDescriptionFields.containsKey(name.toLowerCase()));
 
             System.out.println("Found matching files in " + inputFolder + ": " + Arrays.toString(inputFiles));
             System.out.println("\r\n");
             if (inputFiles != null) {
                 for (File inputFile : inputFiles) {
-                    List<String> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(inputFile.getName());
+                    List<String> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(inputFile.getName().toLowerCase());
                     if (shortDescriptionsToChangeInInputFile != null && !shortDescriptionsToChangeInInputFile.isEmpty()) {
 
                         System.out.println("Processing short descriptions in " + inputFile.getAbsolutePath());
