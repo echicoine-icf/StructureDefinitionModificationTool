@@ -15,7 +15,17 @@ public class Main {
     public static final String EXTENSION = "extension";
     public static final String STRUCTURE_DEFINITION = "StructureDefinition";
     public static final String DIFFERENTIAL = "differential";
+    public static final String ID = "id";
+    public static final String SHORT = "short";
+    public static final String MUST_SUPPORT = "mustSupport";
 
+    /**
+     * This branch processes StructureDefinition files in the output folder. Any element that meets this condition:
+     *      mustSupport not present or false, extension list does not have qicore entry but does have uscdi entry
+     * Then the following change will occur to matching StructureDefinition file input folder:
+     *      json bloc will be added to elements array in input file, short will only have "(USCDI)" prepended
+     * @param args
+     */
     public static void main(String[] args) {
 
         String inputFolder = "input" + File.separator + "profiles";
@@ -26,19 +36,21 @@ public class Main {
                 name.toLowerCase().endsWith(".json"));
 
         if (outputFiles != null) {
-            Map<String, List<String>> shortDescriptionFields = new HashMap<>();
+            Map<String, List<JsonObject>> shortDescriptionFields = new HashMap<>();
 
             for (File outputFile : outputFiles) {
                 System.out.println("\r\nProcessing " + outputFile.getAbsolutePath());
-                List<String> shortDescriptionsToChange = getShortDescriptionsToChangeList(outputFile);
-                if (!shortDescriptionsToChange.isEmpty()) {
+                List<JsonObject> jsonBodiesToMigrate = getJsonBodyList(outputFile);
+
+
+                if (!jsonBodiesToMigrate.isEmpty()) {
                     String identifier = "";
                     try {
                         identifier = getIdFromJson(outputFile).toLowerCase();
-                    }catch (Exception e){
+                    } catch (Exception e) {
                         identifier = outputFile.getName().toLowerCase();
                     }
-                    shortDescriptionFields.put(identifier, shortDescriptionsToChange);
+                    shortDescriptionFields.put(identifier, jsonBodiesToMigrate);
                 }
             }
             System.out.println("\r\n");
@@ -56,14 +68,14 @@ public class Main {
                     String identifier = "";
                     try {
                         identifier = getIdFromJson(inputFile).toLowerCase();
-                    }catch (Exception e){
+                    } catch (Exception e) {
                         identifier = inputFile.getName().toLowerCase();
                     }
-                    List<String> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(identifier);
+                    List<JsonObject> shortDescriptionsToChangeInInputFile = shortDescriptionFields.get(identifier);
 
                     if (shortDescriptionsToChangeInInputFile != null && !shortDescriptionsToChangeInInputFile.isEmpty()) {
-                        System.out.println("Processing short descriptions in " + inputFile.getAbsolutePath());
-                        changeShortDescriptions(inputFile, shortDescriptionsToChangeInInputFile);
+                        System.out.println("Processing json blocs in " + inputFile.getAbsolutePath());
+                        addJsonBlocsToFile(inputFile, shortDescriptionsToChangeInInputFile);
                     }
                 }
             } else {
@@ -76,56 +88,45 @@ public class Main {
             System.err.println("Error: Unable to list files in the output folder.");
         }
 
-        System.out.println("File modification is done. Generating the IG should show updated shortDescription.");
+        System.out.println("File modification is done. Generating the IG should show updated element list in files above.");
     }
 
-    private static void changeShortDescriptions(File inputFile, List<String> identifiers) {
-        if (identifiers == null || identifiers.isEmpty()) {
-            System.err.println("Error: List of short descriptions for " + inputFile.getName() + " are blank.");
+    private static void addJsonBlocsToFile(File inputFile, List<JsonObject> jsonBlocs) {
+        if (jsonBlocs == null || jsonBlocs.isEmpty()) {
+            System.err.println("Error: List of elements for " + inputFile.getName() + " are blank.");
             return;
-        }else{
-            System.out.println("Looking for identifiers: " + String.join(",", identifiers));
         }
 
         try {
             JsonObject inputJson = parseJsonFromFile(inputFile);
+            JsonArray copiedElementsArray = new JsonArray();
             if (inputJson.has(DIFFERENTIAL) && inputJson.getAsJsonObject(DIFFERENTIAL).has(ELEMENT)) {
+
+                List<String> jsonBlocIdentifiers = new ArrayList<>();
+
+                JsonArray jsonArray = new JsonArray();
+                for (JsonObject jsonObject : jsonBlocs) {
+                    jsonBlocIdentifiers.add(jsonObject.get(ID).getAsString());
+                    jsonArray.add(jsonObject);
+                }
+
+                //copy the elements to a new array but ignore any that have an id matching the json blocs coming in:
                 JsonArray elementsArray = inputJson.getAsJsonObject(DIFFERENTIAL).getAsJsonArray(ELEMENT);
-                for (JsonElement element : elementsArray) {
 
-                    if (element instanceof JsonObject) {
-
-                        JsonObject elementObj = (JsonObject) element;
-
-                        String elementIdentifier = elementObj.get("id").getAsString();
-
-                        System.out.println(elementIdentifier);
-                        if (identifiers.contains(elementIdentifier)) {
-                            System.out.println("Match: " + elementIdentifier);
-
-                            String shortDescription = "";
-
-                            try{
-                                shortDescription = elementObj.getAsJsonPrimitive("short").getAsString();
-                            }catch (Exception e){
-                                //doesn't have a short description yet, we'll add one.
-                            }
-
-                            // Modify shortDescription
-                            String newShortDescription = "(USCDI)(QI-Core)" + shortDescription
-                                    .replace("(QI-Core)", "")
-                                    .replace("(USCDI)", "");
-
-                            // Update shortDescription in the output JSON
-                            elementObj.addProperty("short", newShortDescription);
-
-                            System.out.println(elementIdentifier + " to be modified: " + newShortDescription);
-                        }
+                for (JsonElement element : elementsArray){
+                    if (!jsonBlocIdentifiers.contains(((JsonObject)element).get(ID).getAsString())){
+                        copiedElementsArray.add(element);
                     }
                 }
+
+                //now add all the new
+                copiedElementsArray.addAll(jsonArray);
             }
+            inputJson.getAsJsonObject(DIFFERENTIAL).remove(ELEMENT);
+            inputJson.getAsJsonObject(DIFFERENTIAL).add(ELEMENT, copiedElementsArray);
 
             writeJsonToFile(inputFile, inputJson);
+            System.out.println (inputFile.getAbsolutePath() + " saw " + jsonBlocs.size() + " elements added.");
 
         } catch (Exception e) {
             System.err.println("Error processing file: " + inputFile.getName());
@@ -134,13 +135,14 @@ public class Main {
 
     }
 
-    private static String getIdFromJson(File file) throws Exception{
+    private static String getIdFromJson(File file) throws Exception {
         JsonObject jsonData = parseJsonFromFile(file);
-        return jsonData.get("id").getAsString();
+        return jsonData.get(ID).getAsString();
     }
-    private static List<String> getShortDescriptionsToChangeList(File outputFile) {
 
-        List<String> shortDescriptionsToChange = new ArrayList<>();
+    private static List<JsonObject> getJsonBodyList(File outputFile) {
+
+        List<JsonObject> jsonBodiesToMigrateOver = new ArrayList<>();
         try {
             // Parse JSON data from the file in output folder:
             JsonObject outputJson = parseJsonFromFile(outputFile);
@@ -154,28 +156,52 @@ public class Main {
 
                     if (element instanceof JsonObject) {
                         JsonObject elementObj = (JsonObject) element;
-                        String elementIdentifier = elementObj.get("id").getAsString();
-                        // Check if the elementObj has the "extension" property
-                        if (elementObj.has(EXTENSION)) {
 
-                            //get urls from extension array
-                            JsonArray extensionArray = elementObj.getAsJsonArray(EXTENSION);
+                        String elementIdentifier = elementObj.get(ID).getAsString();
 
-                            // Check condition:
-                            if (hasBothURLTypes(extensionArray)) {
-                                // Find shortDescription
-                                String shortDescription = elementObj.getAsJsonPrimitive("short").getAsString();
-
-                                // Modify shortDescription
-                                String newShortDescription = "(USCDI)(QI-Core)" + shortDescription
-                                        .replace("(QI-Core)", "")
-                                        .replace("(USCDI)", "");
-
-                                // Update shortDescription in the output JSON
-                                System.out.println("Will update: " + elementIdentifier + " - " + newShortDescription);
-                                shortDescriptionsToChange.add(elementIdentifier);
-
+                        String mustSupport = "";
+                            if (elementObj.has(MUST_SUPPORT)) {
+                                mustSupport = elementObj.get(MUST_SUPPORT).getAsString();
+                            }else{
+                                mustSupport = "false";
                             }
+
+                        if (elementObj.has(EXTENSION) && hasOnlyUscdiUrl(elementObj.getAsJsonArray(EXTENSION)) && mustSupport.equalsIgnoreCase("false")) {
+
+
+
+                            //this needs to be at position 0:
+                            JsonObject newEntry = new JsonObject();
+                            newEntry.addProperty("url", "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-keyelement");
+                            newEntry.addProperty("valueBoolean", true);
+
+                            JsonArray newExtensionArray =  new JsonArray();
+                            newExtensionArray.add(newEntry);
+                            for (JsonElement el: elementObj.getAsJsonArray(EXTENSION)){
+                                JsonObject extensionObj = (JsonObject) el;
+
+                                if (extensionObj.has(URL) && extensionObj.getAsJsonPrimitive(URL).getAsString().endsWith(USCDI_REQUIREMENT)) {
+                                    continue;
+                                }else{
+                                    newExtensionArray.add(el);
+                                }
+                            }
+//                            newExtensionArray.addAll(elementObj.getAsJsonArray(EXTENSION));
+
+                            // Find shortDescription
+                            String shortDescription = elementObj.getAsJsonPrimitive(SHORT).getAsString();
+
+                            // Modify shortDescription
+                            String newShortDescription = "(QI-Core)" + shortDescription;
+
+                            // Update shortDescription in the output JSON
+                            System.out.println("Will update: " + elementIdentifier + " - " + newShortDescription);
+
+                            elementObj.addProperty("short", newShortDescription);
+                            elementObj.remove(EXTENSION);
+                            elementObj.add(EXTENSION, newExtensionArray);
+                            jsonBodiesToMigrateOver.add(elementObj);
+
                         }
                     }
                 }
@@ -185,7 +211,27 @@ public class Main {
             e.printStackTrace();
         }
 
-        return shortDescriptionsToChange;
+        return jsonBodiesToMigrateOver;
+    }
+
+    private static boolean hasOnlyUscdiUrl(JsonArray extensionArray) {
+        boolean qiCoreFound = false;
+        boolean uscdiFound = false;
+
+        for (JsonElement extensionElement : extensionArray) {
+            if (extensionElement instanceof JsonObject) {
+                JsonObject extensionObj = (JsonObject) extensionElement;
+                if (extensionObj.has(URL) && extensionObj.getAsJsonPrimitive(URL).getAsString().endsWith(QICORE_KEYELEMENT)) {
+                    qiCoreFound = true;
+                }
+
+                if (extensionObj.has(URL) && extensionObj.getAsJsonPrimitive(URL).getAsString().endsWith(USCDI_REQUIREMENT)) {
+                    uscdiFound = true;
+                }
+            }
+        }
+
+        return !qiCoreFound && uscdiFound;
     }
 
     private static boolean hasBothURLTypes(JsonArray extensionArray) {
