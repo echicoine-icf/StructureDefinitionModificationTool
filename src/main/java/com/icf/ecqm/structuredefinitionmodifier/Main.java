@@ -18,6 +18,7 @@ public class Main {
     public static final String ID = "id";
     public static final String SHORT = "short";
     public static final String MUST_SUPPORT = "mustSupport";
+    public static final String  = "(QI-Core)";
 
     /**
      * This branch processes StructureDefinition files in the output folder. Any element that meets this condition:
@@ -192,7 +193,8 @@ public class Main {
                             String shortDescription = elementObj.getAsJsonPrimitive(SHORT).getAsString();
 
                             // Modify shortDescription
-                            String newShortDescription = "(QI-Core)" + shortDescription;
+                            // changed 06/28/2024 https://jira.hl7.org/browse/FHIR-45360
+                            String newShortDescription =  shortDescription.replace("(QI-Core)", "(QI)").replace("(USCDI)", "");
 
                             // Update shortDescription in the output JSON
                             System.out.println("Will update: " + elementIdentifier + " - " + newShortDescription);
